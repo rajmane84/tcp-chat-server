@@ -5,6 +5,7 @@ import (
 	"net"
 	"bufio"
 	"sync"
+	"strings"
 )
 
 type Client struct {
@@ -38,11 +39,16 @@ func (s *Server) removeClient(client Client){
 func (s *Server) broadcast(sender Client, message string) {
     s.mu.Lock()
     defer s.mu.Unlock()
+
+	// Handled the case where the client disconnects at the exact moment broadcast is looping over clients list
     for _, client := range s.clients {
-        if client.conn != sender.conn {
-            client.conn.Write([]byte(fmt.Sprintf("[%s]: %s\n", sender.username, message)))
-        }
-    }
+		if client.conn != sender.conn {
+			_, err := client.conn.Write([]byte(fmt.Sprintf("[%s]: %s\n", sender.username, message)))
+			if err != nil {
+				fmt.Printf("Failed to send message to %s: %s\n", client.username, err)
+			}
+		}
+	}
 }
 
 func (s *Server) handleConnection(conn net.Conn){
@@ -50,15 +56,19 @@ func (s *Server) handleConnection(conn net.Conn){
 
 	scanner := bufio.NewScanner(conn);
 
-	err := scanner.Err();
-	if err != nil {
-		fmt.Printf("Error while scanning", err);
-	}
-
 	conn.Write([]byte("Enter your username: "));
 	var username string;
-	if scanner.Scan() {
-		username = scanner.Text();
+	for {
+		if !scanner.Scan() {
+			// client disconnected before entering username
+			fmt.Println("Client disconnected before entering username")
+			return;
+		}
+		username = strings.TrimSpace(scanner.Text())
+		if username != "" {
+			break;
+		}
+		conn.Write([]byte("Username cannot be empty. Enter your username: "))
 	}
 
 	client := Client{conn: conn, username: username};
@@ -71,6 +81,13 @@ func (s *Server) handleConnection(conn net.Conn){
 		message := scanner.Text();
 		// fmt.Printf("[%s]: %s\n", client.username, message)
 		s.broadcast(client, message);
+	}
+
+	// Distinguish clean disconnect vs error
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("%s lost connection due to error: %s\n", client.username, err)
+	} else {
+		fmt.Printf("%s disconnected cleanly\n", client.username)
 	}
 
 	s.removeClient(client);
