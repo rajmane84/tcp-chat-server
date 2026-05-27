@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"bufio"
+	"sync"
 )
 
 type Client struct {
@@ -11,7 +12,40 @@ type Client struct {
 	username string
 }
 
-func hanldeConnection(conn net.Conn){
+type Server struct {
+	clients []Client
+	mu      sync.Mutex
+}
+
+func (s *Server) addClient(client Client) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    s.clients = append(s.clients, client)
+}
+
+func (s *Server) removeClient(client Client){
+	s.mu.Lock();
+	defer s.mu.Unlock();
+
+	for i, c := range s.clients {
+        if c.conn == client.conn {
+            s.clients = append(s.clients[:i], s.clients[i+1:]...)
+            break
+        }
+    }
+}
+
+func (s *Server) broadcast(sender Client, message string) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    for _, client := range s.clients {
+        if client.conn != sender.conn {
+            client.conn.Write([]byte(fmt.Sprintf("[%s]: %s\n", sender.username, message)))
+        }
+    }
+}
+
+func (s *Server) handleConnection(conn net.Conn){
 	defer conn.Close();
 
 	scanner := bufio.NewScanner(conn);
@@ -28,15 +62,20 @@ func hanldeConnection(conn net.Conn){
 	}
 
 	client := Client{conn: conn, username: username};
+	s.addClient(client)
 	fmt.Printf("%s joined the server ( from %s )\n", client.username, client.conn.RemoteAddr());
+	s.broadcast(Client{username: "Server"}, fmt.Sprintf("%s joined the chat", username))
 
 
 	for scanner.Scan() {
 		message := scanner.Text();
-		fmt.Printf("[%s]: %s\n", client.username, message)
+		// fmt.Printf("[%s]: %s\n", client.username, message)
+		s.broadcast(client, message);
 	}
 
+	s.removeClient(client);
 	fmt.Printf("Client disconnected: %s\n [%s]", client.username, client.conn.RemoteAddr());
+	s.broadcast(Client{username: "Server"}, fmt.Sprintf("%s left the chat", username))
 }
 
 func main() {
@@ -49,6 +88,8 @@ func main() {
 
 	fmt.Println("TCP Server started on PORT 8080");
 
+	server := &Server{}
+
 	for {
 		conn, err := listener.Accept();
 		if err != nil {
@@ -56,6 +97,6 @@ func main() {
 			continue;
 		}
 
-		go hanldeConnection(conn);
+		go server.handleConnection(conn);
 	}
 }
