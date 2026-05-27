@@ -4,29 +4,39 @@ import (
 	"fmt"
 	"net"
 	"bufio"
-	"log"
 )
+
+type Client struct {
+	conn net.Conn
+	username string
+}
 
 func hanldeConnection(conn net.Conn){
 	defer conn.Close();
 
-	fmt.Printf("Client connected: %s\n", conn.RemoteAddr());
-
 	scanner := bufio.NewScanner(conn);
 
 	err := scanner.Err();
-
 	if err != nil {
-		log.Fatal("Error while scanning", err);
+		fmt.Printf("Error while scanning", err);
 	}
+
+	conn.Write([]byte("Enter your username: "));
+	var username string;
+	if scanner.Scan() {
+		username = scanner.Text();
+	}
+
+	client := Client{conn: conn, username: username};
+	fmt.Printf("%s joined the server ( from %s )\n", client.username, client.conn.RemoteAddr());
 
 
 	for scanner.Scan() {
 		message := scanner.Text();
-		fmt.Printf("[%s]: %s\n", conn.RemoteAddr(), message)
+		fmt.Printf("[%s]: %s\n", client.username, message)
 	}
 
-	fmt.Printf("Client disconnected: %s\n", conn.RemoteAddr());
+	fmt.Printf("Client disconnected: %s\n [%s]", client.username, client.conn.RemoteAddr());
 }
 
 func main() {
